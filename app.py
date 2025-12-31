@@ -1,39 +1,74 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import os
 
 app = Flask(__name__)
+CORS(app)
 
-df = pd.read_csv('mobile_recommendation_system_dataset.csv')
-df['price'] = df['price'].astype(str).str.replace('[^0-9]', '', regex=True).astype(int)
+# =========================
+# LOAD DATASET
+# =========================
+try:
+    df = pd.read_csv("mobile_recommendation_system_dataset.csv")
+except Exception as e:
+    print("Error load dataset:", e)
+    df = pd.DataFrame()
 
-tfidf = TfidfVectorizer(stop_words='english')
-tfidf_matrix = tfidf.fit_transform(df['corpus'])
-similarity = cosine_similarity(tfidf_matrix)
+# Bersihkan data
+df = df.fillna("")
 
-@app.route('/recommend', methods=['GET'])
+# =========================
+# HOME
+# =========================
+@app.route("/")
+def home():
+    return "Backend Sistem Pakar Rekomendasi Smartphone Aktif (Railway)"
+
+# =========================
+# SISTEM PAKAR (FORWARD CHAINING)
+# =========================
+@app.route("/recommend", methods=["GET"])
 def recommend():
-    keyword = request.args.get('keyword')
-    max_price = int(request.args.get('price'))
+    phone_type = request.args.get("type", "").lower()
+    budget = request.args.get("budget", type=int)
 
-    idx = df[df['corpus'].str.lower().str.contains(keyword.lower())].index
-    if len(idx) == 0:
-        return jsonify([])
+    if phone_type == "" or budget is None:
+        return jsonify({
+            "error": "Parameter 'type' dan 'budget' wajib diisi"
+        })
 
-    scores = similarity[idx[0]]
-    results = sorted(list(enumerate(scores)), key=lambda x: x[1], reverse=True)
+    # RULE BASE (Forward Chaining)
+    result = df[
+        (df["category"].str.lower() == phone_type) &
+        (df["price"] <= budget)
+    ]
 
+    # Urutkan hasil terbaik
+    result = result.sort_values(
+        by=["rating", "price"],
+        ascending=[False, True]
+    )
+
+    result = result.head(10)
+
+    # Output JSON aman
     output = []
-    for i, _ in results[:5]:
+    for _, row in result.iterrows():
         output.append({
-            'name': df.iloc[i]['name'],
-            'price': df.iloc[i]['price'],
-            'rating': df.iloc[i]['ratings'],
-            'image': df.iloc[i]['imgURL']
+            "name": str(row["name"]),
+            "price": int(row["price"]),
+            "rating": float(row["rating"]),
+            "image": str(row["image"]),
+            "chipset": str(row.get("chipset", "")),
+            "category": str(row.get("category", ""))
         })
 
     return jsonify(output)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# =========================
+# RUN APP (WAJIB RAILWAY)
+# =========================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
